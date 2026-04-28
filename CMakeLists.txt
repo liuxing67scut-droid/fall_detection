@@ -1,0 +1,28 @@
+cmake_minimum_required(VERSION 3.16)
+
+project(fall_detect LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+find_package(OpenCV REQUIRED COMPONENTS core dnn highgui imgcodecs imgproc objdetect videoio)
+
+add_executable(fall_detect
+  src/main.cpp
+  src/camera/CameraManager.cpp
+  src/core/App.cpp
+  src/detect/PersonDetector.cpp
+  src/fall/FallDetector.cpp
+  src/tracking/SinglePersonTracker.cpp
+  src/ui/Renderer.cpp
+)
+
+target_include_directories(fall_detect PRIVATE include)
+target_link_libraries(fall_detect PRIVATE ${OpenCV_LIBS})
+
+if(MSVC)
+  target_compile_options(fall_detect PRIVATE /W4)
+else()
+  target_compile_options(fall_detect PRIVATE -Wall -Wextra -Wpedantic)
+endif()

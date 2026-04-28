@@ -1,0 +1,19 @@
+# Python virtual environments and local tooling
+.venvs/
+
+# Editor / local machine settings
+.vscode/
+
+# Local build outputs
+build/
+build_check/
+cmake-build-*/
+
+# Runtime-generated data and local test assets
+data/
+
+# External reference project, not part of the main codebase
+reference/
+
+# Model export intermediates; keep ONNX files if you want reproducible local tests
+models/*.pt

@@ -1,0 +1,44 @@
+# Camera preview defaults for the first milestone.
+camera_source: "0"
+frame_width: 640
+frame_height: 480
+frame_fps: 30
+window_name: "Fall Detection Preview"
+frame_timeout_ms: 1000
+
+# Stage 2 person detection settings.
+# Recommended formal model path:
+#   ./models/yolo11n.onnx
+# The current rollback keeps the previously verified combination:
+#   yolo11n.onnx + 640x640 detector input
+# If the model file is still missing, the project can temporarily fall back to HOG.
+# Current default is biased slightly toward smoother preview on Raspberry Pi 4B.
+detector_interval: 2
+detector_model_path: "./models/yolo11n_320.onnx"
+detector_input_width: 320
+detector_input_height: 320
+detector_confidence_threshold: 0.1
+detector_nms_threshold: 0.45
+detector_person_class_id: 0
+detector_swap_rb: true
+detector_use_hog_fallback: true
+detector_max_detections: 1
+
+# Single-person tracker settings for smoother target continuity before fall logic.
+tracker_new_track_conf_threshold: 0.25
+tracker_hold_track_conf_threshold: 0.05
+tracker_match_iou_threshold: 0.20
+tracker_max_center_distance_ratio: 0.45
+tracker_confirm_frames: 2
+tracker_max_missing_frames: 3
+tracker_smooth_alpha: 0.5
+
+# Fall detector v1 settings based on tracked box geometry and time continuity.
+fall_upright_aspect_ratio_max: 0.85
+fall_baseline_update_alpha: 0.08
+fall_suspect_aspect_ratio_threshold: 1.10
+fall_suspect_height_ratio_threshold: 0.65
+fall_confirm_hold_ms: 700
+fall_recover_aspect_ratio_threshold: 0.85
+fall_recover_height_ratio_threshold: 0.80
+fall_recover_hold_ms: 900
