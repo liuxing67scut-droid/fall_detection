@@ -12,8 +12,13 @@ add_executable(fall_detect
   src/main.cpp
   src/camera/CameraManager.cpp
   src/core/App.cpp
+  src/core/MainMenu.cpp
   src/detect/PersonDetector.cpp
   src/fall/FallDetector.cpp
+  src/fall/PoseFallDetector.cpp
+  src/pose/MPPersonDetector.cpp
+  src/pose/MPPoseEstimator.cpp
+  src/pose/MoveNetPoseEstimator.cpp
   src/tracking/SinglePersonTracker.cpp
   src/ui/Renderer.cpp
 )

@@ -1,3 +1,10 @@
+# Pipeline selection:
+#   bbox : current bounding-box baseline
+#   pose : MoveNet-based pose pipeline skeleton
+pipeline_mode: "pose"
+bbox_backend: "yolo11"
+pose_backend: "mediapipe"
+
 # Camera preview defaults for the first milestone.
 camera_source: "0"
 frame_width: 640
@@ -5,6 +12,32 @@ frame_height: 480
 frame_fps: 30
 window_name: "Fall Detection Preview"
 frame_timeout_ms: 1000
+
+# Pose pipeline settings.
+pose_model_path: "./models/movenet_lightning_fp16_nchw.onnx"
+pose_input_width: 192
+pose_input_height: 192
+pose_keypoint_score_threshold: 0.20
+pose_show_detector_box: false
+pose_show_detector_aux_points: false
+pose_show_landmark_bbox: true
+pose_fall_landmark_score_threshold: 0.25
+pose_fall_min_visible_keypoints: 10
+pose_fall_upright_trunk_angle_deg_max: 25.0
+pose_fall_baseline_update_alpha: 0.08
+pose_fall_suspect_trunk_angle_deg_min: 55.0
+pose_fall_suspect_span_ratio_max: 0.62
+pose_fall_suspect_hip_drop_speed_min: 0.35
+pose_fall_knee_angle_crouch_max: 115.0
+pose_fall_confirm_hold_ms: 500
+pose_fall_recover_trunk_angle_deg_max: 30.0
+pose_fall_recover_span_ratio_min: 0.78
+pose_fall_recover_hold_ms: 800
+mp_persondet_model_path: "./models/person_detection_mediapipe_2023mar.onnx"
+mp_pose_model_path: "./models/pose_estimation_mediapipe_2023mar.onnx"
+mp_persondet_score_threshold: 0.50
+mp_persondet_nms_threshold: 0.30
+mp_persondet_top_k: 1
 
 # Stage 2 person detection settings.
 # Recommended formal model path:

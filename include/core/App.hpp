@@ -1,11 +1,17 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "camera/CameraManager.hpp"
+#include "core/RuntimeModeSelection.hpp"
 #include "detect/PersonDetector.hpp"
 #include "fall/FallDetector.hpp"
+#include "fall/PoseFallDetector.hpp"
+#include "pose/MPPersonDetector.hpp"
+#include "pose/MPPoseEstimator.hpp"
+#include "pose/MoveNetPoseEstimator.hpp"
 #include "tracking/SinglePersonTracker.hpp"
 
 namespace asdun {
@@ -13,12 +19,39 @@ namespace asdun {
 class Renderer;
 
 struct AppConfig {
+  std::string pipeline_mode = "bbox";
+  std::string bbox_backend = "yolo11";
+  std::string pose_backend = "mediapipe";
   std::string camera_source = "0";
   int frame_width = 640;
   int frame_height = 480;
   int frame_fps = 30;
   std::string window_name = "Fall Detection Preview";
   int frame_timeout_ms = 1000;
+  std::string pose_model_path = "./models/movenet_lightning_fp16_nchw.onnx";
+  int pose_input_width = 192;
+  int pose_input_height = 192;
+  float pose_keypoint_score_threshold = 0.20F;
+  bool pose_show_detector_box = false;
+  bool pose_show_detector_aux_points = false;
+  bool pose_show_landmark_bbox = true;
+  float pose_fall_landmark_score_threshold = 0.25F;
+  int pose_fall_min_visible_keypoints = 10;
+  float pose_fall_upright_trunk_angle_deg_max = 25.0F;
+  float pose_fall_baseline_update_alpha = 0.08F;
+  float pose_fall_suspect_trunk_angle_deg_min = 55.0F;
+  float pose_fall_suspect_span_ratio_max = 0.62F;
+  float pose_fall_suspect_hip_drop_speed_min = 0.35F;
+  float pose_fall_knee_angle_crouch_max = 115.0F;
+  int pose_fall_confirm_hold_ms = 500;
+  float pose_fall_recover_trunk_angle_deg_max = 30.0F;
+  float pose_fall_recover_span_ratio_min = 0.78F;
+  int pose_fall_recover_hold_ms = 800;
+  std::string mp_persondet_model_path = "./models/person_detection_mediapipe_2023mar.onnx";
+  std::string mp_pose_model_path = "./models/pose_estimation_mediapipe_2023mar.onnx";
+  float mp_persondet_score_threshold = 0.50F;
+  float mp_persondet_nms_threshold = 0.30F;
+  int mp_persondet_top_k = 1;
   int detector_interval = 2;
   std::string detector_model_path = "./models/yolo11n.onnx";
   int detector_input_width = 640;
@@ -48,22 +81,31 @@ struct AppConfig {
 
 class App {
  public:
-  explicit App(std::string config_path);
+  explicit App(std::string config_path, std::optional<RuntimeModeSelection> runtime_selection = std::nullopt);
   ~App();
   int run();
 
  private:
   bool loadConfig();
+  void applyRuntimeSelection();
   bool initComponents();
   int previewLoop();
+  bool isPosePipeline() const;
+  bool isMediaPipePoseBackend() const;
+  bool isHogBBoxBackend() const;
   static std::string trim(std::string value);
 
   std::string config_path_;
+  std::optional<RuntimeModeSelection> runtime_selection_;
   AppConfig config_;
   std::unique_ptr<CameraManager> camera_;
   std::unique_ptr<PersonDetector> detector_;
   std::unique_ptr<SinglePersonTracker> tracker_;
   std::unique_ptr<FallDetector> fall_detector_;
+  std::unique_ptr<MoveNetPoseEstimator> pose_estimator_;
+  std::unique_ptr<MPPersonDetector> mp_person_detector_;
+  std::unique_ptr<MPPoseEstimator> mp_pose_estimator_;
+  std::unique_ptr<PoseFallDetector> pose_fall_detector_;
   std::unique_ptr<Renderer> renderer_;
 };
 
