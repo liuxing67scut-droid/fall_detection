@@ -1,5 +1,6 @@
 # Python virtual environments and local tooling
 .venvs/
+pc_pose_server/.venv/
 
 # Editor / local machine settings
 .vscode/
@@ -17,3 +18,11 @@ reference/
 
 # Model export intermediates; keep ONNX files if you want reproducible local tests
 models/*.pt
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# PC pose service local artifacts
+pc_pose_server/__pycache__/
+pc_pose_server/models/*.task

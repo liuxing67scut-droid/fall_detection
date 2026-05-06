@@ -1,6 +1,7 @@
 #include "core/App.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <exception>
@@ -22,6 +23,14 @@
 namespace asdun {
 
 namespace {
+
+constexpr std::array<const char*, 33> kMediaPipePoseNames = {
+    "nose",         "left_eye_inner",  "left_eye",       "left_eye_outer", "right_eye_inner", "right_eye",
+    "right_eye_outer", "left_ear",     "right_ear",      "mouth_left",     "mouth_right",     "left_shoulder",
+    "right_shoulder", "left_elbow",    "right_elbow",    "left_wrist",     "right_wrist",     "left_pinky",
+    "right_pinky",  "left_index",      "right_index",    "left_thumb",     "right_thumb",     "left_hip",
+    "right_hip",    "left_knee",       "right_knee",     "left_ankle",     "right_ankle",     "left_heel",
+    "right_heel",   "left_foot_index", "right_foot_index"};
 
 bool parseBoolValue(std::string value) {
   std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
@@ -78,37 +87,89 @@ std::string normalizePoseBackend(std::string value) {
   return value;
 }
 
-cv::Scalar trackerColor(const TrackedPerson& tracked_person) {
-  if (!tracked_person.has_target) {
-    return cv::Scalar(0, 160, 255);
-  }
-  if (tracked_person.is_holding) {
-    return cv::Scalar(0, 200, 255);
-  }
-  if (tracked_person.is_confirmed) {
-    return cv::Scalar(0, 220, 0);
-  }
-  return cv::Scalar(255, 210, 0);
+bool isFallTransitionToDetected(FallState previous_state, FallState current_state) {
+  return previous_state != FallState::FallDetected && current_state == FallState::FallDetected;
 }
 
-void drawTrackedPerson(cv::Mat& canvas, const TrackedPerson& tracked_person) {
-  if (!tracked_person.has_target || tracked_person.box.width <= 0 || tracked_person.box.height <= 0) {
+cv::Scalar fallStateColor(FallState state) {
+  switch (state) {
+    case FallState::Normal:
+      return cv::Scalar(60, 220, 60);
+    case FallState::SuspectedFall:
+      return cv::Scalar(0, 165, 255);
+    case FallState::FallDetected:
+      return cv::Scalar(0, 70, 255);
+    case FallState::NoTarget:
+      break;
+  }
+  return cv::Scalar(210, 210, 210);
+}
+
+std::string fallStateShortLabel(FallState state) {
+  switch (state) {
+    case FallState::Normal:
+      return "normal";
+    case FallState::SuspectedFall:
+      return "suspect";
+    case FallState::FallDetected:
+      return "fall";
+    case FallState::NoTarget:
+      break;
+  }
+  return "track";
+}
+
+float clamp01(float value) {
+  return std::clamp(value, 0.0F, 1.0F);
+}
+
+PoseFrameResult remoteResponseToPoseResult(const RemotePoseResponse& response, const cv::Size& frame_size) {
+  PoseFrameResult result;
+  if (!response.ok || frame_size.width <= 0 || frame_size.height <= 0) {
+    return result;
+  }
+
+  result.keypoints.reserve(response.keypoints.size());
+  for (const auto& remote_keypoint : response.keypoints) {
+    PoseKeypoint keypoint;
+    if (remote_keypoint.id >= 0 &&
+        remote_keypoint.id < static_cast<int>(kMediaPipePoseNames.size())) {
+      keypoint.name = kMediaPipePoseNames[static_cast<std::size_t>(remote_keypoint.id)];
+    } else {
+      keypoint.name = "kp_" + std::to_string(remote_keypoint.id);
+    }
+    keypoint.score = remote_keypoint.score;
+    keypoint.point = cv::Point2f(clamp01(remote_keypoint.x) * static_cast<float>(frame_size.width),
+                                 clamp01(remote_keypoint.y) * static_cast<float>(frame_size.height));
+    if (keypoint.score > 0.0F) {
+      result.has_pose = true;
+    }
+    result.keypoints.push_back(std::move(keypoint));
+  }
+  return result;
+}
+
+void drawLabeledBox(cv::Mat& canvas, const cv::Rect& box, const cv::Scalar& color, const std::string& label) {
+  if (box.width <= 0 || box.height <= 0) {
     return;
   }
 
-  const cv::Scalar color = trackerColor(tracked_person);
-  cv::rectangle(canvas, tracked_person.box, color, 2);
-
-  std::ostringstream oss;
-  oss << "track " << std::fixed << std::setprecision(2) << tracked_person.confidence
-      << " " << trackerStateLabel(tracked_person);
-  if (tracked_person.missing_frames > 0) {
-    oss << " miss=" << tracked_person.missing_frames;
+  cv::rectangle(canvas, box, color, 2);
+  if (label.empty()) {
+    return;
   }
 
   cv::putText(canvas,
-              oss.str(),
-              cv::Point(tracked_person.box.x, std::max(12, tracked_person.box.y - 8)),
+              label,
+              cv::Point(box.x, std::max(18, box.y - 8)),
+              cv::FONT_HERSHEY_SIMPLEX,
+              0.45,
+              cv::Scalar(0, 0, 0),
+              3,
+              cv::LINE_AA);
+  cv::putText(canvas,
+              label,
+              cv::Point(box.x, std::max(18, box.y - 8)),
               cv::FONT_HERSHEY_SIMPLEX,
               0.45,
               color,
@@ -116,35 +177,19 @@ void drawTrackedPerson(cv::Mat& canvas, const TrackedPerson& tracked_person) {
               cv::LINE_AA);
 }
 
-void drawFallState(cv::Mat& canvas, const FallStatus& fall_status) {
-  const std::string label = fallStateLabel(fall_status.state);
-  cv::Scalar color(180, 220, 180);
-  if (fall_status.state == FallState::SuspectedFall) {
-    color = cv::Scalar(0, 210, 255);
-  } else if (fall_status.state == FallState::FallDetected) {
-    color = cv::Scalar(0, 70, 255);
+void drawTrackedPerson(cv::Mat& canvas, const TrackedPerson& tracked_person, const FallStatus& fall_status) {
+  if (!tracked_person.has_target || tracked_person.box.width <= 0 || tracked_person.box.height <= 0) {
+    return;
   }
 
-  const cv::Point anchor(18, std::max(28, canvas.rows - 22));
-  cv::putText(canvas,
-              label,
-              anchor,
-              cv::FONT_HERSHEY_SIMPLEX,
-              0.7,
-              cv::Scalar(0, 0, 0),
-              4,
-              cv::LINE_AA);
-  cv::putText(canvas,
-              label,
-              anchor,
-              cv::FONT_HERSHEY_SIMPLEX,
-              0.7,
-              color,
-              2,
-              cv::LINE_AA);
+  const FallState visual_state = fall_status.state != FallState::NoTarget ? fall_status.state : FallState::Normal;
+  drawLabeledBox(canvas, tracked_person.box, fallStateColor(visual_state), fallStateShortLabel(visual_state));
 }
 
-void drawPoseResult(cv::Mat& canvas, const PoseFrameResult& pose_result, float keypoint_score_threshold) {
+void drawPoseResult(cv::Mat& canvas,
+                    const PoseFrameResult& pose_result,
+                    float keypoint_score_threshold,
+                    bool show_pose_joints) {
   static const std::vector<std::pair<int, int>> kCoco17Edges = {
       {0, 1},   {0, 2},   {1, 3},   {2, 4},   {5, 6},   {5, 7},   {7, 9},   {6, 8},   {8, 10},
       {5, 11},  {6, 12},  {11, 12}, {11, 13}, {13, 15}, {12, 14}, {14, 16}};
@@ -155,6 +200,9 @@ void drawPoseResult(cv::Mat& canvas, const PoseFrameResult& pose_result, float k
       {25, 27}, {26, 28}, {27, 29}, {28, 30}, {29, 31}, {30, 32}, {27, 31}, {28, 32}};
 
   if (!pose_result.has_pose) {
+    return;
+  }
+  if (!show_pose_joints) {
     return;
   }
 
@@ -208,6 +256,16 @@ cv::Rect computePoseLandmarkBox(const PoseFrameResult& pose_result, float keypoi
   const int pad_x = std::max(8, width / 12);
   const int pad_y = std::max(8, height / 12);
   return cv::Rect(min_x - pad_x, min_y - pad_y, width + pad_x * 2, height + pad_y * 2);
+}
+
+void drawPoseFallBox(cv::Mat& canvas, const cv::Rect& landmark_box, const PoseFallStatus& pose_fall_status) {
+  if (landmark_box.width <= 0 || landmark_box.height <= 0) {
+    return;
+  }
+
+  const FallState visual_state =
+      pose_fall_status.state != FallState::NoTarget ? pose_fall_status.state : FallState::Normal;
+  drawLabeledBox(canvas, landmark_box, fallStateColor(visual_state), fallStateShortLabel(visual_state));
 }
 
 void drawMediaPipePerson(cv::Mat& canvas,
@@ -342,6 +400,44 @@ bool App::loadConfig() {
         config_.mp_persondet_nms_threshold = std::stof(value);
       } else if (key == "mp_persondet_top_k") {
         config_.mp_persondet_top_k = std::stoi(value);
+      } else if (key == "remote_pose_server_url") {
+        config_.remote_pose_server_url = value;
+      } else if (key == "remote_pose_health_path") {
+        config_.remote_pose_health_path = value;
+      } else if (key == "remote_pose_analyze_path") {
+        config_.remote_pose_analyze_path = value;
+      } else if (key == "remote_pose_connect_timeout_ms") {
+        config_.remote_pose_connect_timeout_ms = std::stoi(value);
+      } else if (key == "remote_pose_timeout_ms") {
+        config_.remote_pose_timeout_ms = std::stoi(value);
+      } else if (key == "remote_pose_submit_interval_ms") {
+        config_.remote_pose_submit_interval_ms = std::stoi(value);
+      } else if (key == "remote_pose_jpeg_quality") {
+        config_.remote_pose_jpeg_quality = std::stoi(value);
+      } else if (key == "remote_pose_debug") {
+        config_.remote_pose_debug = parseBoolValue(value);
+      } else if (key == "fall_alert_enabled") {
+        config_.fall_alert_enabled = parseBoolValue(value);
+      } else if (key == "fall_alert_base_url") {
+        config_.fall_alert_base_url = value;
+      } else if (key == "fall_alert_event_path") {
+        config_.fall_alert_event_path = value;
+      } else if (key == "fall_alert_device_id") {
+        config_.fall_alert_device_id = value;
+      } else if (key == "fall_alert_device_token") {
+        config_.fall_alert_device_token = value;
+      } else if (key == "fall_alert_message") {
+        config_.fall_alert_message = value;
+      } else if (key == "fall_alert_connect_timeout_ms") {
+        config_.fall_alert_connect_timeout_ms = std::stoi(value);
+      } else if (key == "fall_alert_timeout_ms") {
+        config_.fall_alert_timeout_ms = std::stoi(value);
+      } else if (key == "fall_alert_cooldown_ms") {
+        config_.fall_alert_cooldown_ms = std::stoi(value);
+      } else if (key == "fall_alert_jpeg_quality") {
+        config_.fall_alert_jpeg_quality = std::stoi(value);
+      } else if (key == "fall_alert_debug") {
+        config_.fall_alert_debug = parseBoolValue(value);
       } else if (key == "detector_interval") {
         config_.detector_interval = std::stoi(value);
       } else if (key == "detector_model_path") {
@@ -420,6 +516,22 @@ bool App::initComponents() {
     return false;
   }
 
+  if (config_.fall_alert_enabled) {
+    FallAlertClientConfig alert_config;
+    alert_config.enabled = config_.fall_alert_enabled;
+    alert_config.base_url = config_.fall_alert_base_url;
+    alert_config.event_path = config_.fall_alert_event_path;
+    alert_config.device_id = config_.fall_alert_device_id;
+    alert_config.device_token = config_.fall_alert_device_token;
+    alert_config.connect_timeout_ms = config_.fall_alert_connect_timeout_ms;
+    alert_config.timeout_ms = config_.fall_alert_timeout_ms;
+    alert_config.cooldown_ms = config_.fall_alert_cooldown_ms;
+    alert_config.jpeg_quality = config_.fall_alert_jpeg_quality;
+    alert_config.debug = config_.fall_alert_debug;
+    fall_alert_client_ = std::make_unique<FallAlertClient>(std::move(alert_config));
+    fall_alert_client_->start();
+  }
+
   if (isPosePipeline()) {
     pose_fall_detector_ = std::make_unique<PoseFallDetector>(config_.pose_fall_landmark_score_threshold,
                                                              config_.pose_fall_min_visible_keypoints,
@@ -433,7 +545,22 @@ bool App::initComponents() {
                                                              config_.pose_fall_recover_trunk_angle_deg_max,
                                                              config_.pose_fall_recover_span_ratio_min,
                                                              config_.pose_fall_recover_hold_ms);
-    if (isMediaPipePoseBackend()) {
+    if (isRemotePoseBackend()) {
+      PoseRemoteClientConfig remote_config;
+      remote_config.server_url = config_.remote_pose_server_url;
+      remote_config.health_path = config_.remote_pose_health_path;
+      remote_config.analyze_path = config_.remote_pose_analyze_path;
+      remote_config.connect_timeout_ms = config_.remote_pose_connect_timeout_ms;
+      remote_config.timeout_ms = config_.remote_pose_timeout_ms;
+      remote_config.submit_interval_ms = config_.remote_pose_submit_interval_ms;
+      remote_config.jpeg_quality = config_.remote_pose_jpeg_quality;
+      remote_config.debug = config_.remote_pose_debug;
+      pose_remote_client_ = std::make_unique<PoseRemoteClient>(std::move(remote_config));
+      if (!pose_remote_client_->start()) {
+        std::cerr << "[App] remote pose client is unavailable." << std::endl;
+        return false;
+      }
+    } else if (isMediaPipePoseBackend()) {
       mp_person_detector_ = std::make_unique<MPPersonDetector>(config_.mp_persondet_model_path,
                                                                config_.mp_persondet_score_threshold,
                                                                config_.mp_persondet_nms_threshold,
@@ -485,7 +612,9 @@ bool App::initComponents() {
   std::cout << "[App] pipeline=" << config_.pipeline_mode << std::endl;
   if (isPosePipeline()) {
     std::cout << "[App] pose_backend=" << config_.pose_backend << std::endl;
-    if (isMediaPipePoseBackend()) {
+    if (isRemotePoseBackend()) {
+      std::cout << "[App] " << pose_remote_client_->statusMessage() << std::endl;
+    } else if (isMediaPipePoseBackend()) {
       std::cout << "[App] " << mp_person_detector_->statusMessage() << std::endl;
       std::cout << "[App] " << mp_pose_estimator_->statusMessage() << std::endl;
     } else {
@@ -494,6 +623,9 @@ bool App::initComponents() {
   } else {
     std::cout << "[App] bbox_backend=" << config_.bbox_backend << std::endl;
     std::cout << "[App] " << detector_->statusMessage() << std::endl;
+  }
+  if (fall_alert_client_) {
+    std::cout << "[App] " << fall_alert_client_->statusMessage() << std::endl;
   }
   return true;
 }
@@ -506,9 +638,12 @@ int App::previewLoop() {
   PoseFrameResult pose_result;
   PoseFallStatus pose_fall_status;
   MPPersonRegion mp_person_region;
+  RemotePoseResponse remote_pose_response;
   double smoothed_fps = 0.0;
   std::uint64_t last_frame_ts_ms = 0;
   double last_detect_ms = 0.0;
+  FallState last_box_alert_state = FallState::NoTarget;
+  FallState last_pose_alert_state = FallState::NoTarget;
   while (true) {
     FramePacket frame_packet;
     if (!camera_->getLatestFrame(frame_packet, static_cast<std::uint32_t>(config_.frame_timeout_ms))) {
@@ -524,19 +659,39 @@ int App::previewLoop() {
 
     const int safe_interval = std::max(config_.detector_interval, 1);
     if (isPosePipeline()) {
-      const auto pose_begin = std::chrono::steady_clock::now();
-      if (isMediaPipePoseBackend()) {
-        const std::vector<MPPersonRegion> regions = mp_person_detector_->detect(frame_packet.bgr);
-        mp_person_region = regions.empty() ? MPPersonRegion{} : regions.front();
-        pose_result = mp_pose_estimator_->estimate(frame_packet.bgr, mp_person_region);
+      if (isRemotePoseBackend()) {
+        if (pose_remote_client_) {
+          pose_remote_client_->submit(frame_packet.bgr, frame_packet.frame_id, frame_packet.ts_ms);
+          if (const auto latest = pose_remote_client_->consumeLatest(); latest.has_value()) {
+            remote_pose_response = *latest;
+            pose_result = remoteResponseToPoseResult(remote_pose_response, frame_packet.bgr.size());
+            if (pose_fall_detector_) {
+              pose_fall_status = pose_fall_detector_->update(pose_result, frame_packet.ts_ms);
+            }
+            last_detect_ms = remote_pose_response.latency_ms;
+          }
+        }
       } else {
-        pose_result = pose_estimator_->estimate(frame_packet.bgr);
+        const auto pose_begin = std::chrono::steady_clock::now();
+        if (isMediaPipePoseBackend()) {
+          const std::vector<MPPersonRegion> regions = mp_person_detector_->detect(frame_packet.bgr);
+          mp_person_region = regions.empty() ? MPPersonRegion{} : regions.front();
+          pose_result = mp_pose_estimator_->estimate(frame_packet.bgr, mp_person_region);
+        } else {
+          pose_result = pose_estimator_->estimate(frame_packet.bgr);
+        }
+        if (pose_fall_detector_) {
+          pose_fall_status = pose_fall_detector_->update(pose_result, frame_packet.ts_ms);
+        }
+        const auto pose_end = std::chrono::steady_clock::now();
+        last_detect_ms = std::chrono::duration<double, std::milli>(pose_end - pose_begin).count();
       }
-      if (pose_fall_detector_) {
-        pose_fall_status = pose_fall_detector_->update(pose_result, frame_packet.ts_ms);
-      }
-      const auto pose_end = std::chrono::steady_clock::now();
-      last_detect_ms = std::chrono::duration<double, std::milli>(pose_end - pose_begin).count();
+      maybeQueueFallAlert(frame_packet.bgr,
+                          frame_packet.frame_id,
+                          frame_packet.ts_ms,
+                          smoothed_fps,
+                          pose_fall_status.state,
+                          last_pose_alert_state);
     } else {
       if (frame_packet.frame_id == 1 || (frame_packet.frame_id % static_cast<std::uint64_t>(safe_interval)) == 0) {
         const auto detect_begin = std::chrono::steady_clock::now();
@@ -549,6 +704,12 @@ int App::previewLoop() {
         tracked_person = tracker_->current();
       }
       fall_status = fall_detector_->update(tracked_person, frame_packet.ts_ms);
+      maybeQueueFallAlert(frame_packet.bgr,
+                          frame_packet.frame_id,
+                          frame_packet.ts_ms,
+                          smoothed_fps,
+                          fall_status.state,
+                          last_box_alert_state);
     }
 
     cv::Mat canvas = frame_packet.bgr.clone();
@@ -559,94 +720,118 @@ int App::previewLoop() {
                             config_.pose_show_detector_box,
                             config_.pose_show_detector_aux_points);
       }
-      drawPoseResult(canvas, pose_result, config_.pose_keypoint_score_threshold);
+      drawPoseResult(canvas, pose_result, config_.pose_keypoint_score_threshold, show_pose_joints_);
       if (config_.pose_show_landmark_bbox) {
         cv::Rect landmark_box = computePoseLandmarkBox(pose_result, config_.pose_keypoint_score_threshold);
         landmark_box &= cv::Rect(0, 0, canvas.cols, canvas.rows);
         if (landmark_box.width > 0 && landmark_box.height > 0) {
-          cv::rectangle(canvas, landmark_box, cv::Scalar(0, 255, 0), 2);
+          drawPoseFallBox(canvas, landmark_box, pose_fall_status);
         }
       }
     } else {
-      drawTrackedPerson(canvas, tracked_person);
-      drawFallState(canvas, fall_status);
+      drawTrackedPerson(canvas, tracked_person, fall_status);
     }
 
     std::vector<std::string> status_lines;
-    {
-      std::ostringstream oss;
-      oss << "source=" << config_.camera_source << " size=" << frame_packet.bgr.cols << "x" << frame_packet.bgr.rows;
-      status_lines.push_back(oss.str());
-    }
-    {
-      std::ostringstream oss;
-      oss << "pipeline=" << config_.pipeline_mode;
-      status_lines.push_back(oss.str());
-    }
-    if (isPosePipeline()) {
+    if (show_status_overlay_) {
       {
         std::ostringstream oss;
-        oss << "pose_backend=" << config_.pose_backend;
+        oss << "source=" << config_.camera_source << " size=" << frame_packet.bgr.cols << "x"
+            << frame_packet.bgr.rows;
         status_lines.push_back(oss.str());
       }
-      if (isMediaPipePoseBackend()) {
+      {
         std::ostringstream oss;
-        oss << mp_person_detector_->statusMessage()
-            << " person=" << (mp_person_region.valid() ? "yes" : "no");
+        oss << "pipeline=" << config_.pipeline_mode;
         status_lines.push_back(oss.str());
-        std::ostringstream pose_oss;
-        pose_oss << mp_pose_estimator_->statusMessage()
-                 << " keypoints=" << pose_result.keypoints.size();
-        status_lines.push_back(pose_oss.str());
+      }
+      if (isPosePipeline()) {
+        {
+          std::ostringstream oss;
+          oss << "pose_backend=" << config_.pose_backend;
+          status_lines.push_back(oss.str());
+        }
+        if (isRemotePoseBackend()) {
+          std::ostringstream oss;
+          oss << pose_remote_client_->statusMessage()
+              << " frame_id=" << remote_pose_response.frame_id
+              << " keypoints=" << pose_result.keypoints.size();
+          status_lines.push_back(oss.str());
+        } else if (isMediaPipePoseBackend()) {
+          std::ostringstream oss;
+          oss << mp_person_detector_->statusMessage()
+              << " person=" << (mp_person_region.valid() ? "yes" : "no");
+          status_lines.push_back(oss.str());
+          std::ostringstream pose_oss;
+          pose_oss << mp_pose_estimator_->statusMessage()
+                   << " keypoints=" << pose_result.keypoints.size();
+          status_lines.push_back(pose_oss.str());
+        } else {
+          std::ostringstream oss;
+          oss << pose_estimator_->statusMessage()
+              << " keypoints=" << pose_result.keypoints.size();
+          status_lines.push_back(oss.str());
+        }
+        {
+          std::ostringstream oss;
+          oss << "pose_fall=" << fallStateLabel(pose_fall_status.state)
+              << " angle=" << std::fixed << std::setprecision(1) << pose_fall_status.trunk_angle_deg
+              << " span=" << std::fixed << std::setprecision(2) << pose_fall_status.vertical_span_ratio
+              << " drop=" << std::fixed << std::setprecision(2) << pose_fall_status.hip_drop_speed
+              << " vis=" << pose_fall_status.visible_keypoints;
+          status_lines.push_back(oss.str());
+        }
       } else {
-        std::ostringstream oss;
-        oss << pose_estimator_->statusMessage()
-            << " keypoints=" << pose_result.keypoints.size();
-        status_lines.push_back(oss.str());
+        {
+          std::ostringstream oss;
+          oss << "bbox_backend=" << config_.bbox_backend;
+          status_lines.push_back(oss.str());
+        }
+        {
+          std::ostringstream oss;
+          oss << "persons=" << cached_detections.size() << " " << detector_->statusMessage();
+          status_lines.push_back(oss.str());
+        }
+        {
+          std::ostringstream oss;
+          oss << "track=" << trackerStateLabel(tracked_person)
+              << " conf=" << std::fixed << std::setprecision(2) << tracked_person.confidence
+              << " miss=" << tracked_person.missing_frames;
+          status_lines.push_back(oss.str());
+        }
+        {
+          std::ostringstream oss;
+          oss << "fall=" << fallStateLabel(fall_status.state)
+              << " ar=" << std::fixed << std::setprecision(2) << fall_status.aspect_ratio
+              << " hr=" << std::fixed << std::setprecision(2) << fall_status.height_ratio;
+          status_lines.push_back(oss.str());
+        }
       }
       {
         std::ostringstream oss;
-        oss << "pose_fall=" << fallStateLabel(pose_fall_status.state)
-            << " angle=" << std::fixed << std::setprecision(1) << pose_fall_status.trunk_angle_deg
-            << " span=" << std::fixed << std::setprecision(2) << pose_fall_status.vertical_span_ratio
-            << " drop=" << std::fixed << std::setprecision(2) << pose_fall_status.hip_drop_speed
-            << " vis=" << pose_fall_status.visible_keypoints;
+        oss << std::fixed << std::setprecision(1)
+            << "req_fps=" << config_.frame_fps
+            << " actual_fps=" << smoothed_fps
+            << " detect_ms=" << last_detect_ms;
+        if (isRemotePoseBackend()) {
+          oss << " remote_every_ms=" << config_.remote_pose_submit_interval_ms;
+        } else {
+          oss << " det_every=" << safe_interval;
+        }
         status_lines.push_back(oss.str());
       }
-    } else {
-      {
-        std::ostringstream oss;
-        oss << "bbox_backend=" << config_.bbox_backend;
-        status_lines.push_back(oss.str());
+      if (fall_alert_client_) {
+        status_lines.push_back(fall_alert_client_->statusMessage());
       }
-      std::ostringstream oss;
-      oss << "persons=" << cached_detections.size() << " " << detector_->statusMessage();
-      status_lines.push_back(oss.str());
-    }
-    if (!isPosePipeline()) {
-      std::ostringstream oss;
-      oss << "track=" << trackerStateLabel(tracked_person)
-          << " conf=" << std::fixed << std::setprecision(2) << tracked_person.confidence
-          << " miss=" << tracked_person.missing_frames;
-      status_lines.push_back(oss.str());
-    }
-    if (!isPosePipeline()) {
-      std::ostringstream oss;
-      oss << "fall=" << fallStateLabel(fall_status.state)
-          << " ar=" << std::fixed << std::setprecision(2) << fall_status.aspect_ratio
-          << " hr=" << std::fixed << std::setprecision(2) << fall_status.height_ratio;
-      status_lines.push_back(oss.str());
     }
     {
       std::ostringstream oss;
-      oss << std::fixed << std::setprecision(1)
-          << "req_fps=" << config_.frame_fps
-          << " actual_fps=" << smoothed_fps
-          << " detect_ms=" << last_detect_ms
-          << " det_every=" << safe_interval;
+      oss << "keys: q/Esc exit | s save snapshot | i info";
+      if (isPosePipeline()) {
+        oss << " | j joints";
+      }
       status_lines.push_back(oss.str());
     }
-    status_lines.push_back("keys: q/Esc exit | s save snapshot");
 
     renderer_->drawPreview(canvas, status_lines);
 
@@ -661,6 +846,12 @@ int App::previewLoop() {
       } else {
         std::cerr << "[App] failed to save snapshot: " << output_path << std::endl;
       }
+    }
+    if (key == 'i' || key == 'I') {
+      show_status_overlay_ = !show_status_overlay_;
+    }
+    if ((key == 'j' || key == 'J') && isPosePipeline()) {
+      show_pose_joints_ = !show_pose_joints_;
     }
   }
 
@@ -677,8 +868,46 @@ bool App::isMediaPipePoseBackend() const {
   return normalizePoseBackend(config_.pose_backend) == "mediapipe";
 }
 
+bool App::isRemotePoseBackend() const {
+  const std::string backend = normalizePoseBackend(config_.pose_backend);
+  return backend == "pc_mediapipe" || backend == "remote";
+}
+
 bool App::isHogBBoxBackend() const {
   return normalizeBboxBackend(config_.bbox_backend) == "hog";
+}
+
+void App::maybeQueueFallAlert(const cv::Mat& frame_bgr,
+                              std::uint64_t frame_id,
+                              std::uint64_t ts_ms,
+                              double fps,
+                              FallState current_state,
+                              FallState& previous_state) {
+  if (!fall_alert_client_) {
+    previous_state = current_state;
+    return;
+  }
+
+  if (isFallTransitionToDetected(previous_state, current_state)) {
+    FallAlertEvent event;
+    event.source_device = config_.fall_alert_device_id;
+    event.frame_id = frame_id;
+    event.ts_ms = ts_ms;
+    event.mode = currentModeLabel();
+    event.fall_state = fallStateLabel(current_state);
+    event.message = config_.fall_alert_message;
+    event.fps = fps;
+    fall_alert_client_->enqueue(frame_bgr, event);
+  }
+
+  previous_state = current_state;
+}
+
+std::string App::currentModeLabel() const {
+  if (isPosePipeline()) {
+    return "pose:" + config_.pose_backend;
+  }
+  return "bbox:" + config_.bbox_backend;
 }
 
 std::string App::trim(std::string value) {

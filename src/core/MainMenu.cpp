@@ -13,7 +13,7 @@ std::optional<RuntimeModeSelection> showMainMenu() {
     std::cout << "1) HOG + Box" << std::endl;
     std::cout << "2) YOLO11 + Box" << std::endl;
     std::cout << "3) MediaPipe + Pose" << std::endl;
-    std::cout << "4) PC Mode (Later)" << std::endl;
+    std::cout << "4) MediaPipe (PC) + Pose (Pi)" << std::endl;
     std::cout << "0) Exit" << std::endl;
     std::cout << "Enter command: ";
 
@@ -35,8 +35,7 @@ std::optional<RuntimeModeSelection> showMainMenu() {
       return RuntimeModeSelection{"pose", "yolo11", "mediapipe"};
     }
     if (input == "4") {
-      std::cout << "[Menu] PC Mode is not implemented yet." << std::endl;
-      continue;
+      return RuntimeModeSelection{"pose", "yolo11", "pc_mediapipe"};
     }
 
     std::cout << "[Menu] Invalid command. Please try again." << std::endl;

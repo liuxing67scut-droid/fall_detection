@@ -1,6 +1,6 @@
 # Pipeline selection:
 #   bbox : current bounding-box baseline
-#   pose : MoveNet-based pose pipeline skeleton
+#   pose : pose-based pipeline (local or remote backend)
 pipeline_mode: "pose"
 bbox_backend: "yolo11"
 pose_backend: "mediapipe"
@@ -38,6 +38,28 @@ mp_pose_model_path: "./models/pose_estimation_mediapipe_2023mar.onnx"
 mp_persondet_score_threshold: 0.50
 mp_persondet_nms_threshold: 0.30
 mp_persondet_top_k: 1
+remote_pose_server_url: "http://100.87.247.58:8000"
+remote_pose_health_path: "/health"
+remote_pose_analyze_path: "/analyze_pose"
+remote_pose_connect_timeout_ms: 300
+remote_pose_timeout_ms: 1500
+remote_pose_submit_interval_ms: 0
+remote_pose_jpeg_quality: 80
+remote_pose_debug: false
+
+# Fall alert upload settings.
+# Default is disabled until the platform server adds POST /api/events/fall.
+fall_alert_enabled: false
+fall_alert_base_url: "http://100.87.247.58:9000"
+fall_alert_event_path: "/api/events/fall"
+fall_alert_device_id: "pi-01"
+fall_alert_device_token: ""
+fall_alert_message: "Possible fall detected in the scene. Please check immediately."
+fall_alert_connect_timeout_ms: 1000
+fall_alert_timeout_ms: 3000
+fall_alert_cooldown_ms: 30000
+fall_alert_jpeg_quality: 85
+fall_alert_debug: false
 
 # Stage 2 person detection settings.
 # Recommended formal model path:

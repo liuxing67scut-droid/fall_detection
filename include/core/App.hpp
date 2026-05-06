@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 
+#include "alert/FallAlertClient.hpp"
 #include "camera/CameraManager.hpp"
 #include "core/RuntimeModeSelection.hpp"
 #include "detect/PersonDetector.hpp"
@@ -12,6 +13,7 @@
 #include "pose/MPPersonDetector.hpp"
 #include "pose/MPPoseEstimator.hpp"
 #include "pose/MoveNetPoseEstimator.hpp"
+#include "remote/PoseRemoteClient.hpp"
 #include "tracking/SinglePersonTracker.hpp"
 
 namespace asdun {
@@ -52,6 +54,25 @@ struct AppConfig {
   float mp_persondet_score_threshold = 0.50F;
   float mp_persondet_nms_threshold = 0.30F;
   int mp_persondet_top_k = 1;
+  std::string remote_pose_server_url = "http://100.87.247.58:8000";
+  std::string remote_pose_health_path = "/health";
+  std::string remote_pose_analyze_path = "/analyze_pose";
+  int remote_pose_connect_timeout_ms = 300;
+  int remote_pose_timeout_ms = 1500;
+  int remote_pose_submit_interval_ms = 220;
+  int remote_pose_jpeg_quality = 80;
+  bool remote_pose_debug = false;
+  bool fall_alert_enabled = false;
+  std::string fall_alert_base_url = "http://100.87.247.58:9000";
+  std::string fall_alert_event_path = "/api/events/fall";
+  std::string fall_alert_device_id = "pi-01";
+  std::string fall_alert_device_token{};
+  std::string fall_alert_message = "Possible fall detected in the scene. Please check immediately.";
+  int fall_alert_connect_timeout_ms = 1000;
+  int fall_alert_timeout_ms = 3000;
+  int fall_alert_cooldown_ms = 30000;
+  int fall_alert_jpeg_quality = 85;
+  bool fall_alert_debug = false;
   int detector_interval = 2;
   std::string detector_model_path = "./models/yolo11n.onnx";
   int detector_input_width = 640;
@@ -92,7 +113,15 @@ class App {
   int previewLoop();
   bool isPosePipeline() const;
   bool isMediaPipePoseBackend() const;
+  bool isRemotePoseBackend() const;
   bool isHogBBoxBackend() const;
+  void maybeQueueFallAlert(const cv::Mat& frame_bgr,
+                           std::uint64_t frame_id,
+                           std::uint64_t ts_ms,
+                           double fps,
+                           FallState current_state,
+                           FallState& previous_state);
+  std::string currentModeLabel() const;
   static std::string trim(std::string value);
 
   std::string config_path_;
@@ -105,8 +134,12 @@ class App {
   std::unique_ptr<MoveNetPoseEstimator> pose_estimator_;
   std::unique_ptr<MPPersonDetector> mp_person_detector_;
   std::unique_ptr<MPPoseEstimator> mp_pose_estimator_;
+  std::unique_ptr<PoseRemoteClient> pose_remote_client_;
+  std::unique_ptr<FallAlertClient> fall_alert_client_;
   std::unique_ptr<PoseFallDetector> pose_fall_detector_;
   std::unique_ptr<Renderer> renderer_;
+  bool show_status_overlay_ = true;
+  bool show_pose_joints_ = true;
 };
 
 }  // namespace asdun
