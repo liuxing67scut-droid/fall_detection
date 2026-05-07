@@ -15,6 +15,7 @@ data/
 
 # External reference project, not part of the main codebase
 reference/
+fall_detection_with_alert/
 
 # Model export intermediates; keep ONNX files if you want reproducible local tests
 models/*.pt

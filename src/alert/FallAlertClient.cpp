@@ -1,6 +1,7 @@
 #include "alert/FallAlertClient.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <iostream>
 #include <string>
@@ -32,6 +33,15 @@ std::string joinUrl(const std::string& base_url, const std::string& path) {
     return trimTrailingSlash(base_url) + path;
   }
   return trimTrailingSlash(base_url) + "/" + path;
+}
+
+bool isRaiseAction(const std::string& alert_action) {
+  std::string lower;
+  lower.reserve(alert_action.size());
+  for (char ch : alert_action) {
+    lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+  }
+  return lower == "raise";
 }
 
 #ifdef USE_FALL_ALERT_CLIENT
@@ -71,7 +81,7 @@ bool FallAlertClient::start() {
   }
   curl_global_init(CURL_GLOBAL_DEFAULT);
   running_ = true;
-  pending_request_.reset();
+  pending_requests_.clear();
   last_accept_ts_ms_ = 0;
   status_message_ = "fall_alert=ready";
   worker_ = std::thread(&FallAlertClient::workerLoop, this);
@@ -107,7 +117,8 @@ bool FallAlertClient::enqueue(const cv::Mat& frame_bgr, const FallAlertEvent& ev
     status_message_ = "fall_alert=not_running";
     return false;
   }
-  if (last_accept_ts_ms_ > 0 && event.ts_ms >= last_accept_ts_ms_ &&
+  const bool apply_cooldown = isRaiseAction(event.alert_action);
+  if (apply_cooldown && last_accept_ts_ms_ > 0 && event.ts_ms >= last_accept_ts_ms_ &&
       event.ts_ms - last_accept_ts_ms_ < static_cast<std::uint64_t>(std::max(0, config_.cooldown_ms))) {
     status_message_ = "fall_alert=cooldown";
     return false;
@@ -116,7 +127,7 @@ bool FallAlertClient::enqueue(const cv::Mat& frame_bgr, const FallAlertEvent& ev
   PendingRequest request;
   request.event = event;
   request.frame_bgr = frame_bgr.clone();
-  pending_request_ = std::move(request);
+  pending_requests_.push_back(std::move(request));
   last_accept_ts_ms_ = event.ts_ms;
   status_message_ = "fall_alert=queued";
   cv_.notify_one();
@@ -155,6 +166,7 @@ bool FallAlertClient::postEvent(const PendingRequest& request) const {
   addTextPart("frame_id", std::to_string(request.event.frame_id));
   addTextPart("ts_ms", std::to_string(request.event.ts_ms));
   addTextPart("mode", request.event.mode);
+  addTextPart("alert_action", request.event.alert_action);
   addTextPart("fall_state", request.event.fall_state);
   addTextPart("message", request.event.message);
   addTextPart("fps", std::to_string(request.event.fps));
@@ -214,12 +226,12 @@ void FallAlertClient::workerLoop() {
     std::optional<PendingRequest> request;
     {
       std::unique_lock<std::mutex> lock(mutex_);
-      cv_.wait(lock, [this] { return !running_ || pending_request_.has_value(); });
+      cv_.wait(lock, [this] { return !running_ || !pending_requests_.empty(); });
       if (!running_) {
         break;
       }
-      request = std::move(pending_request_);
-      pending_request_.reset();
+      request = std::move(pending_requests_.front());
+      pending_requests_.pop_front();
       status_message_ = "fall_alert=uploading";
     }
 

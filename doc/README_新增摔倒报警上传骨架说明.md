@@ -23,7 +23,8 @@
 当前 Pi 端已经具备：
 
 - 在 `bbox` 或 `pose` 路线下监听 `FallState`
-- 当状态 **首次切换到** `fall_detected` 时触发一次报警上传
+- 当状态 **首次切换到** `fall_detected` 时触发一次 `raise` 报警上传
+- 当状态从 `fall_detected` 恢复到 `normal` 时触发一次 `clear` 解除上传
 - 自动读取当前原始画面并 JPEG 编码
 - 通过 `multipart/form-data` 方式准备上传：
   - 文本字段
@@ -62,12 +63,14 @@
 
 当前默认配置是：
 
-- `fall_alert_enabled: false`
+- `fall_alert_enabled: true`
+- `fall_alert_base_url: "http://8.163.47.15:9000"`
 
 也就是说：
 
-- 默认不会真的对平台发起上传
-- 等平台接口准备好后，再在 Pi 端打开这一项做联调
+- 当前主工程已经默认指向正式网站地址
+- 进入 `fall_detected` 时会触发报警上传
+- 恢复到 `normal` 时会触发解除上传
 
 ## 6. 交付时最重要的接口约定
 
@@ -77,6 +80,7 @@ Pi 端准备上传的核心字段包括：
 - `frame_id`
 - `ts_ms`
 - `mode`
+- `alert_action`
 - `fall_state`
 - `message`
 - `fps`

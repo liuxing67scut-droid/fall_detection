@@ -62,12 +62,13 @@ struct AppConfig {
   int remote_pose_submit_interval_ms = 220;
   int remote_pose_jpeg_quality = 80;
   bool remote_pose_debug = false;
-  bool fall_alert_enabled = false;
-  std::string fall_alert_base_url = "http://100.87.247.58:9000";
+  bool fall_alert_enabled = true;
+  std::string fall_alert_base_url = "http://8.163.47.15:9000";
   std::string fall_alert_event_path = "/api/events/fall";
-  std::string fall_alert_device_id = "pi-01";
-  std::string fall_alert_device_token{};
+  std::string fall_alert_device_id = "visual-fall-detector";
+  std::string fall_alert_device_token{"vision123456"};
   std::string fall_alert_message = "Possible fall detected in the scene. Please check immediately.";
+  std::string fall_alert_clear_message = "Fall alert cleared for the current scene.";
   int fall_alert_connect_timeout_ms = 1000;
   int fall_alert_timeout_ms = 3000;
   int fall_alert_cooldown_ms = 30000;

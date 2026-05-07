@@ -1,6 +1,7 @@
 #pragma once
 
 #include <condition_variable>
+#include <deque>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -39,7 +40,7 @@ class FallAlertClient {
   FallAlertClientConfig config_{};
   mutable std::mutex mutex_{};
   std::condition_variable cv_{};
-  std::optional<PendingRequest> pending_request_{};
+  std::deque<PendingRequest> pending_requests_{};
   std::thread worker_{};
   bool running_{false};
   std::uint64_t last_accept_ts_ms_{0};

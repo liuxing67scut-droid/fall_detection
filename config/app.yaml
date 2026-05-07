@@ -48,13 +48,13 @@ remote_pose_jpeg_quality: 80
 remote_pose_debug: false
 
 # Fall alert upload settings.
-# Default is disabled until the platform server adds POST /api/events/fall.
-fall_alert_enabled: false
-fall_alert_base_url: "http://100.87.247.58:9000"
+fall_alert_enabled: true
+fall_alert_base_url: "http://8.163.47.15:9000"
 fall_alert_event_path: "/api/events/fall"
-fall_alert_device_id: "pi-01"
-fall_alert_device_token: ""
+fall_alert_device_id: "visual-fall-detector"
+fall_alert_device_token: "vision123456"
 fall_alert_message: "Possible fall detected in the scene. Please check immediately."
+fall_alert_clear_message: "Fall alert cleared for the current scene."
 fall_alert_connect_timeout_ms: 1000
 fall_alert_timeout_ms: 3000
 fall_alert_cooldown_ms: 30000

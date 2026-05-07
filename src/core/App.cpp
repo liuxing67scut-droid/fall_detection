@@ -87,8 +87,12 @@ std::string normalizePoseBackend(std::string value) {
   return value;
 }
 
-bool isFallTransitionToDetected(FallState previous_state, FallState current_state) {
+bool isFallRaiseTransition(FallState previous_state, FallState current_state) {
   return previous_state != FallState::FallDetected && current_state == FallState::FallDetected;
+}
+
+bool isFallClearTransition(FallState previous_state, FallState current_state) {
+  return previous_state == FallState::FallDetected && current_state == FallState::Normal;
 }
 
 cv::Scalar fallStateColor(FallState state) {
@@ -428,6 +432,8 @@ bool App::loadConfig() {
         config_.fall_alert_device_token = value;
       } else if (key == "fall_alert_message") {
         config_.fall_alert_message = value;
+      } else if (key == "fall_alert_clear_message") {
+        config_.fall_alert_clear_message = value;
       } else if (key == "fall_alert_connect_timeout_ms") {
         config_.fall_alert_connect_timeout_ms = std::stoi(value);
       } else if (key == "fall_alert_timeout_ms") {
@@ -888,14 +894,26 @@ void App::maybeQueueFallAlert(const cv::Mat& frame_bgr,
     return;
   }
 
-  if (isFallTransitionToDetected(previous_state, current_state)) {
+  if (isFallRaiseTransition(previous_state, current_state)) {
     FallAlertEvent event;
     event.source_device = config_.fall_alert_device_id;
     event.frame_id = frame_id;
     event.ts_ms = ts_ms;
     event.mode = currentModeLabel();
+    event.alert_action = "raise";
     event.fall_state = fallStateLabel(current_state);
     event.message = config_.fall_alert_message;
+    event.fps = fps;
+    fall_alert_client_->enqueue(frame_bgr, event);
+  } else if (isFallClearTransition(previous_state, current_state)) {
+    FallAlertEvent event;
+    event.source_device = config_.fall_alert_device_id;
+    event.frame_id = frame_id;
+    event.ts_ms = ts_ms;
+    event.mode = currentModeLabel();
+    event.alert_action = "clear";
+    event.fall_state = fallStateLabel(current_state);
+    event.message = config_.fall_alert_clear_message;
     event.fps = fps;
     fall_alert_client_->enqueue(frame_bgr, event);
   }
