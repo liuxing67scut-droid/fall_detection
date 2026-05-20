@@ -13,6 +13,10 @@ cmake-build-*/
 # Runtime-generated data and local test assets
 data/
 
+# Local report-only materials
+scripts/
+doc/figures/
+
 # External reference project, not part of the main codebase
 reference/
 fall_detection_with_alert/
